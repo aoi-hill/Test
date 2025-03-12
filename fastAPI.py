@@ -110,7 +110,7 @@ async def deployApi():
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Run Configuration</title>
+        <title>Deploy Configuration</title>
         <style>
             input[type="text"] {
                 width: 600px;
@@ -124,10 +124,12 @@ async def deployApi():
         </style>
     </head>
     <body>
-        <h2>Edit Run Configuration</h2>
+        <h2>Edit Deploy Configuration</h2>
         <form method="post">
     """
     for key, value in dataRun.items():
+        if key!="deploymentName" and key!="poolName":
+            continue
         value_str = "" if value is None else str(value)
         form_html += f"""
             <label>{key}:</label>
@@ -143,7 +145,7 @@ async def deployApi():
 
     return form_html
 
-@app.post("/deploy", response_class=HTMLResponse)
+@app.post("/deploy", response_class=JSONResponse)
 async def deployApi(request: Request):
     """Endpoint to deploy the flow"""
     global readRunConfigFile
@@ -153,21 +155,24 @@ async def deployApi(request: Request):
     # Create a config handler
     config_handler_run = configData(dataRun)
     
-    # Get form data
-    form_data = await request.form()
-    form_dict = dict(form_data)
+    try:
+        data = await request.json()
+    except Exception:
+        # If JSON parsing fails, try getting form data
+        form_data = await request.form()
+        data = dict(form_data)
     
     # Update configuration
-    updatedRunConfig = await config_handler_run.update_config(form_dict)
-
+    updatedRunConfig = await config_handler_run.update_config(data)
+    
     prefectLogger.info("Starting Only Deploy mode")
     # prefectLogger.info(updatedFlowConfig)
     # prefectLogger.info('************************************')
     
     await currentOrchestrator.deploy(name = updatedRunConfig["deploymentName"], workPoolName = updatedRunConfig["poolName"])
     
-    # return JSONResponse(content=updated_data)
-    return styleResponse("DEPLOYMENT DONE")
+    return JSONResponse(content=data)
+    # return styleResponse("DEPLOYMENT DONE")
 
 @app.get("/oldRun", response_class=HTMLResponse)
 async def oldRunApi():
@@ -175,22 +180,61 @@ async def oldRunApi():
     global inputFlowConfig, readRunConfigFile
     dataFlow = inputFlowConfig
     dataRun = readRunConfigFile
+    
 
-    # Generate HTML dynamically
     form_html = """
     <!DOCTYPE html>
-    <html>
+    <html lang="en">
     <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Run Configuration</title>
         <style>
-            input[type="text"] {
-                width: 600px;
-                padding: 5px;
-                margin: 5px 0;
+            body {
+                font-family: Arial, sans-serif;
+                margin: 40px;
+                padding: 20px;
+                background-color: #f4f4f4;
+            }
+            h2 {
+                text-align: center;
+            }
+            form {
+                background: white;
+                padding: 20px;
+                border-radius: 8px;
+                box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+                max-width: 900px;
+                margin: auto;
+            }
+            label {
+                font-weight: bold;
+                display: block;
+                margin-top: 15px;
+            }
+            textarea {
+                width: 100%;
+                height: 30px;
+                padding: 10px;
+                border: 1px solid #ccc;
+                border-radius: 5px;
+                font-size: 14px;
+                resize: vertical;
             }
             button {
-                padding: 10px 15px;
-                margin-top: 10px;
+                display: block;
+                width: 100%;
+                padding: 10px;
+                background: #007BFF;
+                color: white;
+                font-size: 16px;
+                border: none;
+                border-radius: 5px;
+                margin-top: 20px;
+                cursor: pointer;
+            }
+            button:hover {
+                background: #0056b3;
             }
         </style>
     </head>
@@ -198,31 +242,33 @@ async def oldRunApi():
         <h2>Edit Run Configuration</h2>
         <form method="post">
     """
-    
-    for key, value in dataFlow.items():
-        value_str = "" if value is None else str(value)
+
+    # Generate input fields dynamically
+    for key, value in {**dataFlow}.items():
+        value_str = "" if value is None else json.dumps(value) if type(value)==dict else str(value)
         form_html += f"""
-            <label>{key}:</label>
-            <input type="text" name="{key}" value="{value_str}" style="width: 1050px;"><br>
+            <label for="{key}">{key}:</label>
+            <textarea id="{key}" name="{key}">{value_str}</textarea>
         """
     
-    for key, value in dataRun.items():
-        value_str = "" if value is None else str(value)
+    for key, value in {**dataRun}.items():
+        if key not in ["deploymentName","poolName","jati"]: continue
+        value_str = "" if value is None else json.dumps(value) if type(value)==dict else str(value)
         form_html += f"""
-            <label>{key}:</label>
-            <input type="text" name="{key}" value="{value_str}" style="width: 1050px;"><br>
+            <label for="{key}">{key}:</label>
+            <textarea id="{key}" name="{key}">{value_str}</textarea>
         """
-    
+
+    # Submit button
     form_html += """
             <button type="submit">Update</button>
         </form>
     </body>
     </html>
     """
-
     return form_html
 
-@app.post("/oldRun", response_class=HTMLResponse)
+@app.post("/oldRun", response_class=JSONResponse)
 async def oldRunApi(request: Request):
     """Endpoint to deploy the flow"""
     global inputFlowConfig, readRunConfigFile
@@ -234,20 +280,23 @@ async def oldRunApi(request: Request):
     config_handler_flow = configData(dataFlow)
     config_handler_run = configData(dataRun)
     
-    # Get form data
-    form_data = await request.form()
-    form_dict = dict(form_data)
+    try:
+        data = await request.json()
+    except Exception:
+        # If JSON parsing fails, try getting form data
+        form_data = await request.form()
+        data = dict(form_data)
     
     # Update configuration
-    updatedFlowConfig = await config_handler_flow.update_config(form_dict)
-    updatedRunConfig = await config_handler_run.update_config(form_dict)
-
+    updatedFlowConfig = await config_handler_flow.update_config(data)
+    updatedRunConfig = await config_handler_run.update_config(data)
     # index = append_dict_to_json_file(updatedFlowConfig, readRunConfigFile["finalFlowConfig"])
     
     """Endpoint to run a pre-deployed flow"""
     prefectLogger.info("Starting Run Pre-deployed flow mode")    
-    await currentOrchestrator.run(deploymentName=updatedRunConfig["deploymentName"],inputFlowConfig = updatedFlowConfig)
-    return styleResponse("PREVIOUSLY DEPLOYED FLOW HAS RAN")
+    await currentOrchestrator.run(jati=updatedRunConfig["jati"], deploymentName=updatedRunConfig["deploymentName"], inputFlowConfig = updatedFlowConfig)
+    # return styleResponse("PREVIOUSLY DEPLOYED FLOW HAS RAN")
+    return JSONResponse(data)
 
 @app.get("/newRun", response_class=HTMLResponse)
 async def newRunApi():
@@ -256,21 +305,60 @@ async def newRunApi():
     dataFlow = inputFlowConfig
     dataRun = readRunConfigFile
     
-    # Generate HTML dynamically
+
     form_html = """
     <!DOCTYPE html>
-    <html>
+    <html lang="en">
     <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Run Configuration</title>
         <style>
-            input[type="text"] {
-                width: 600px;
-                padding: 5px;
-                margin: 5px 0;
+            body {
+                font-family: Arial, sans-serif;
+                margin: 40px;
+                padding: 20px;
+                background-color: #f4f4f4;
+            }
+            h2 {
+                text-align: center;
+            }
+            form {
+                background: white;
+                padding: 20px;
+                border-radius: 8px;
+                box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+                max-width: 900px;
+                margin: auto;
+            }
+            label {
+                font-weight: bold;
+                display: block;
+                margin-top: 15px;
+            }
+            textarea {
+                width: 100%;
+                height: 30px;
+                padding: 10px;
+                border: 1px solid #ccc;
+                border-radius: 5px;
+                font-size: 14px;
+                resize: vertical;
             }
             button {
-                padding: 10px 15px;
-                margin-top: 10px;
+                display: block;
+                width: 100%;
+                padding: 10px;
+                background: #007BFF;
+                color: white;
+                font-size: 16px;
+                border: none;
+                border-radius: 5px;
+                margin-top: 20px;
+                cursor: pointer;
+            }
+            button:hover {
+                background: #0056b3;
             }
         </style>
     </head>
@@ -279,20 +367,23 @@ async def newRunApi():
         <form method="post">
     """
 
-    for key, value in dataFlow.items():
-        value_str = "" if value is None else str(value)
+    # Generate input fields dynamically
+    for key, value in {**dataFlow}.items():
+        value_str = "" if value is None else json.dumps(value) if type(value)==dict else str(value)
         form_html += f"""
-            <label>{key}:</label>
-            <input type="text" name="{key}" value="{value_str}" style="width: 1050px;"><br>
+            <label for="{key}">{key}:</label>
+            <textarea id="{key}" name="{key}">{value_str}</textarea>
         """
     
-    for key, value in dataRun.items():
-        value_str = "" if value is None else str(value)
+    for key, value in {**dataRun}.items():
+        if key not in ["deploymentName","poolName","jati"]: continue
+        value_str = "" if value is None else json.dumps(value) if type(value)==dict else str(value)
         form_html += f"""
-            <label>{key}:</label>
-            <input type="text" name="{key}" value="{value_str}" style="width: 1050px;"><br>
+            <label for="{key}">{key}:</label>
+            <textarea id="{key}" name="{key}">{value_str}</textarea>
         """
 
+    # Submit button
     form_html += """
             <button type="submit">Update</button>
         </form>
@@ -300,9 +391,10 @@ async def newRunApi():
     </html>
     """
 
+
     return form_html
 
-@app.post("/newRun", response_class=HTMLResponse)
+@app.post("/newRun", response_class=JSONResponse)
 async def newRunApi(request: Request):
     """Endpoint to deploy the flow"""
     
@@ -315,21 +407,25 @@ async def newRunApi(request: Request):
     config_handler_flow = configData(dataFlow)
     config_handler_run = configData(dataRun)
     
-    # Get form data
-    form_data = await request.form()
-    form_dict = dict(form_data)
+    try:
+        data = await request.json()
+    except Exception:
+        # If JSON parsing fails, try getting form data
+        form_data = await request.form()
+        data = dict(form_data)
     
     # Update configuration
-    updatedFlowConfig = await config_handler_flow.update_config(form_dict)
-    updatedRunConfig = await config_handler_run.update_config(form_dict)
+    updatedFlowConfig = await config_handler_flow.update_config(data)
+    updatedRunConfig = await config_handler_run.update_config(data)
 
     # index = append_dict_to_json_file(updatedFlowConfig, readRunConfigFile["finalFlowConfig"])
     
     """Endpoint to deploy and then run a flow"""
     prefectLogger.info("Starting New Run mode")
     await currentOrchestrator.deploy(name = updatedRunConfig["deploymentName"], workPoolName = updatedRunConfig["poolName"])
-    await currentOrchestrator.run(deploymentName=updatedRunConfig["deploymentName"], inputFlowConfig = updatedFlowConfig)
-    return styleResponse("NEWLY DEPLOYED FLOW HAS RAN")
+    await currentOrchestrator.run(jati=updatedRunConfig["jati"], deploymentName=updatedRunConfig["deploymentName"], inputFlowConfig = updatedFlowConfig)
+    # return styleResponse("NEWLY DEPLOYED FLOW HAS RAN")
+    return JSONResponse(data)
 
 @app.get("/deleteDeployment", response_class=HTMLResponse)
 async def deleteDeployment():
@@ -367,22 +463,24 @@ async def deleteDeployment():
 
     return form_html
 
-@app.post("/deleteDeployment", response_class=HTMLResponse)
+@app.post("/deleteDeployment", response_class=JSONResponse)
 async def deleteDeployment(request: Request):
     """Endpoint to delete Deployment"""
     
-    # Get form data
-    form_data = await request.form()
-    form_dict = dict(form_data)
+    try:
+        data = await request.json()
+    except Exception:
+        # If JSON parsing fails, try getting form data
+        form_data = await request.form()
+        data = dict(form_data)
 
     prefectLogger.info("Starting Only Delete deployment")
-    # prefectLogger.info(updatedFlowConfig)
-    # prefectLogger.info('************************************')
+    prefectLogger.info(data["DeploymentID"])
     
-    await currentOrchestrator.deleteDeployment(form_data["DeploymentID"]) #change to ID
+    await currentOrchestrator.deleteDeployment(data["DeploymentID"]) #change to ID
     
-    # return JSONResponse(content=updated_data)
-    return styleResponse("DEPLOYMENT DELETED")
+    return JSONResponse(data)
+    # return styleResponse("DEPLOYMENT DELETED")
 
 @app.get("/viewDeployments", response_class=HTMLResponse)
 async def viewDeployment():
@@ -479,7 +577,7 @@ async def viewDeploymentJson():
         data = json.load(f)
     return JSONResponse(content=data)
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/apiList", response_class=HTMLResponse)
 async def getApiLst():        
     api_list = {
         "Deploy a Flow": "/deploy",
@@ -554,6 +652,17 @@ async def getApiLst():
 
     return HTMLResponse(content=html_content)
 # Write specific post-check functions which can be directly called
+
+@app.get("/apiListJson", response_class=JSONResponse)
+async def getApiLst():        
+    api_list = {
+        "Deploy a Flow": "http://localhost:8000/deploy",
+        "Run an Existing Flow Deployment": "http://localhost:8000/oldRun",
+        "Deploy and Run a Flow": "http://localhost:8000/newRun",
+        "Delete a Deployment":"http://localhost:8000/deleteDeployment",
+        "View Deployments":"http://localhost:8000/viewDeployments"
+    }
+    return JSONResponse(content=api_list)
 
 # Hook Block in JATI will contain list of hooks which are dictionary with keys same as in payload along with the status decorator string
 
