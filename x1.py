@@ -8,20 +8,21 @@ int main() {
     std::string input;
     std::getline(std::cin, input);  // Read JSON from stdin
 
-    // Parse JSON
-    json parsed_json = json::parse(input);
+    try {
+        // Parse JSON
+        json parsed_json = json::parse(input);
 
-    // Print key-value pairs
-    std::cout << "Parsed JSON:\n";
-    for (auto& [key, value] : parsed_json.items()) {
-        std::cout << key << ": " << value << std::endl;
+        // Only print valid JSON (no extra text)
+        std::cout << parsed_json.dump() << std::endl;
+
+    } catch (const json::parse_error& e) {
+        std::cerr << "JSON parsing error: " << e.what() << std::endl;
+        return 1;
     }
-
-    // Convert back to JSON and print
-    std::cout << "\nReconstructed JSON:\n" << parsed_json.dump(4) << std::endl;
 
     return 0;
 }
+
 
 
 
