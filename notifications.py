@@ -1,14 +1,13 @@
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+import asyncio
 import psycopg2
 import select
 import json
-from flask import Flask
-from flask_socketio import SocketIO, emit
+from typing import List
+import uvicorn
+app = FastAPI()
 
-# Initialize Flask + SocketIO
-app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*")
-
-# Connect to your Postgres database
+# Your database connection
 conn = psycopg2.connect(
     dbname="postgres",
     user="postgres",
@@ -16,55 +15,79 @@ conn = psycopg2.connect(
     host="localhost",
     port="5433"
 )
+
 conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
 cur = conn.cursor()
-
-# Listen to the notifications_channel
 cur.execute("LISTEN notifications_channel;")
-print("Listening on channel 'notifications_channel'...")
+print("Listening on 'notifications_channel'...")
 
-# Background task: Listen to new notifications and send
-def listen_to_notifications():
+# Manage WebSocket clients
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def send_json(self, message: dict):
+        for connection in self.active_connections:
+            await connection.send_json(message)
+
+manager = ConnectionManager()
+
+# WebSocket route
+@app.websocket("/ws/notifications")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        cur.execute("SELECT * FROM notifications ORDER BY created_at DESC;")
+        rows = cur.fetchall()
+        colnames = [desc[0] for desc in cur.description]
+        notifications = [dict(zip(colnames, row)) for row in rows]
+
+        await websocket.send_json({
+            "type": "initial_notifications",
+            "data": notifications
+        })
+
+        while True:
+            await asyncio.sleep(1)
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+
+# Normal HTTP route
+@app.get("/try")
+async def func():
+    return {"status": "Backend running ✅"}
+
+# Background task to listen for Postgres NOTIFY
+async def listen_to_notifications_task():
     while True:
-        if select.select([conn], [], [], 5) == ([], [], []):
-            continue  # Timeout
-        else:
-            conn.poll()
-            while conn.notifies:
-                notify = conn.notifies.pop(0)
-                payload = notify.payload
+        await asyncio.sleep(0.1)  # prevent tight CPU loop
+        if select.select([conn], [], [], 0) == ([], [], []):
+            continue
+        conn.poll()
+        while conn.notifies:
+            notify = conn.notifies.pop(0)
+            payload = notify.payload
+            print(json.loads(payload))
+            try:
+                notification_data = json.loads(payload)
+                await manager.send_json({
+                    "type": "notification",
+                    "data": notification_data
+                })
+            except json.JSONDecodeError:
+                print("Invalid JSON received:", payload)
 
-                try:
-                    notification_data = json.loads(payload)
-                    print("Backend Recieved data =============================")
-                    print(notification_data)
-                    
-                    # Send to all connected clients
-                    socketio.emit('notification', notification_data)
-                except json.JSONDecodeError:
-                    print("Invalid JSON:", payload)
-
-# Send initial table data when a client connects
-@socketio.on('connect')
-def handle_connect():
-    print('Client connected')
-    
-    # Fetch all existing notifications
-    cur.execute("SELECT * FROM notifications ORDER BY created_at DESC;")
-    rows = cur.fetchall()
-
-    # Get column names
-    colnames = [desc[0] for desc in cur.description]
-
-    # Convert rows to list of dictionaries
-    notifications = [dict(zip(colnames, row)) for row in rows]
-
-    # Send the initial data
-    emit('initial_notifications', notifications)
-
-if __name__ == '__main__':
-    socketio.start_background_task(listen_to_notifications)
-    socketio.run(app, host='0.0.0.0', port=5000)
+# Start background task at startup
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(listen_to_notifications_task())
 ===================================================================================================================================================================================
 
 CREATE OR REPLACE FUNCTION notify_changes() 
