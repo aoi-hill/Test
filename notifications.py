@@ -130,71 +130,57 @@ WHERE id = 1;
 INSERT INTO notifications (title, message, priority)
 VALUES ('New Feature!', 'Check out our new feature.', 'high');
 =================================================================================================================================================================================
+import React, { useEffect, useState } from 'react';
+import { io } from 'socket.io-client';
 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Real-time Notifications</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-        }
-        #notifications {
-            margin-top: 20px;
-        }
-        .notification {
-            border: 1px solid #ddd;
-            padding: 10px;
-            margin: 5px 0;
-            background-color: #f9f9f9;
-        }
-    </style>
-</head>
-<body>
+const Notifications = () => {
+  const [notifications, setNotifications] = useState([]);
 
-<h2>Notifications</h2>
-<div id="notifications"></div>
+  useEffect(() => {
+    // Connect to WebSocket
+    const socket = io('http://localhost:8000', {
+      path: '/ws/notifications',  // Important: This is your backend WebSocket path
+      transports: ['websocket'],
+    });
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.min.js"></script>
-<script>
-    // Establish a connection to the WebSocket server
-    const socket = io('http://localhost:5000'); // Replace with your server's URL
-
-    // When the client connects to the server, this event will be triggered
+    // Handle incoming messages
     socket.on('connect', () => {
-        console.log('Connected to WebSocket server');
+      console.log('Connected to WebSocket');
     });
 
-    // When the backend sends initial notifications data (upon client connection)
-    socket.on('initial_notifications', (notifications) => {
-        console.log('Received initial notifications:', notifications);
-        displayNotifications(notifications);
+    socket.on('message', (data) => {
+      console.log('Received:', data);
+
+      if (data.type === 'initial_notifications') {
+        setNotifications(data.data);
+      } else if (data.type === 'notification') {
+        // Insert new notification at the top
+        setNotifications(prev => [data.data, ...prev]);
+      }
     });
 
-    // When the backend sends a new notification (after INSERT, UPDATE, DELETE on the table)
-    socket.on('notification', (notification) => {
-        console.log('New notification:', notification);
-        displayNotification(notification);
+    socket.on('disconnect', () => {
+      console.log('Disconnected from WebSocket');
     });
 
-    // Function to display a single notification on the page
-    function displayNotification(notification) {
-        const notificationsDiv = document.getElementById('notifications');
-        const notificationDiv = document.createElement('div');
-        notificationDiv.classList.add('notification');
-        notificationDiv.textContent = JSON.stringify(notification);  // Just for example, you can format it as needed
-        notificationsDiv.appendChild(notificationDiv);
-    }
+    return () => {
+      socket.disconnect();
+    };
+  }, []);
 
-    // Function to display multiple notifications
-    function displayNotifications(notifications) {
-        notifications.forEach(notification => {
-            displayNotification(notification);
-        });
-    }
-</script>
+  return (
+    <div style={{ padding: '20px' }}>
+      <h2>Notifications</h2>
+      <ul>
+        {notifications.map((notification, index) => (
+          <li key={index}>
+            <pre>{JSON.stringify(notification, null, 2)}</pre>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+};
 
-</body>
-</html>
+export default Notifications;
+
